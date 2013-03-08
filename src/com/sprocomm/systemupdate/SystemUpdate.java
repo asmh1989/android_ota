@@ -3,13 +3,7 @@ package com.sprocomm.systemupdate;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
-import java.io.FilenameFilter;
-import java.io.IOException;
 import java.io.InputStream;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Date;
-import java.util.List;
 
 import android.app.ActionBar;
 import android.app.AlertDialog;
@@ -39,6 +33,7 @@ import android.os.StatFs;
 import android.preference.ListPreference;
 import android.preference.Preference;
 import android.preference.Preference.OnPreferenceChangeListener;
+import android.preference.Preference.OnPreferenceClickListener;
 import android.preference.PreferenceActivity;
 import android.preference.PreferenceCategory;
 import android.preference.PreferenceScreen;
@@ -49,22 +44,20 @@ import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
 import android.webkit.MimeTypeMap;
+import android.webkit.WebHistoryItem;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
-public class SystemUpdate extends PreferenceActivity implements OnPreferenceChangeListener {
+public class SystemUpdate extends PreferenceActivity implements OnPreferenceClickListener {
 	private static final String TAG="SUNUPDATE";
-	private static String UPDATES_CATEGORY = "updates_category";
 	private SharedPreferences mPrefs;
-	private ListPreference mUpdateCheck;
 
 	private static final String DL_ID = "downloadId";
 	private static long mDownloadId;
 
 	private static final int MENU_REFRESH = 0;
 	private static final int MENU_DELETE_ALL = 1;
-	private static final int MENU_SYSTEM_INFO = 2;
 	private static final long NEED_MIN_SIZE = 300; //300M
 
 	private static final int DOWNLOAD_XML=1;
@@ -79,7 +72,8 @@ public class SystemUpdate extends PreferenceActivity implements OnPreferenceChan
 	private DownloadManager mDownloadManager;
 
 	private String mSystemMod;
-	private String mSystemRom;
+	private String mSystemBuild;
+	private String mSystemVersion;
 
 	private File mUpdateFolder;
 	private ProgressDialog mProgressDialog;
@@ -88,8 +82,19 @@ public class SystemUpdate extends PreferenceActivity implements OnPreferenceChan
 	private boolean mIsCheckMd5 = false;
 	private boolean mCheckFile = false;
 	private boolean mExistRom = false;
+	private boolean mOnekey = false;
 	private int mDownloadBytes;
 	private int mTotalSize = -1;
+
+	private static final String LOCAL_SYSTEM_INFO="current_system_info";
+	private static final String SERVER_SYSTEM_INFO="server_system_info";
+	private static final String GENERAL_UPDATE="general_update";
+	private static final String ONE_KEY_UPDATE="one_key_update";
+
+	private Preference mLocalSystemInfo;
+	private Preference mServerSystemInfo;
+	private Preference mGengeralUpdate;
+	private Preference mOnekeyUpdate;
 
 	private Handler mHandler= new Handler(){
 		public void handleMessage(Message msg) {
@@ -97,7 +102,7 @@ public class SystemUpdate extends PreferenceActivity implements OnPreferenceChan
 			case DOWNLOAD_XML:
 				mWhichDownload = DOWNLOAD_XML;
 				Log.d(TAG, "start download xml");
-				startDownload(Constants.XML_DOWNLOAD_URL);
+				startDownload(Customization.XML_DOWNLOAD_URL);
 				break;
 			case DOWNLOAD_ROM:
 				startDownload(mRom.getDownLoadUrl());
@@ -113,13 +118,14 @@ public class SystemUpdate extends PreferenceActivity implements OnPreferenceChan
 				if(c.moveToFirst()) {  
 					mDownloadBytes = c.getInt(c.getColumnIndex(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR))/1024;
 					int t = c.getInt(c.getColumnIndex(DownloadManager.COLUMN_TOTAL_SIZE_BYTES));
+					Log.d(TAG, "totalsize = "+t + " downloadsize = "+mDownloadBytes);
 					if (t != -1 ){
 						mTotalSize = t/1024;
 					}
 					if(mDownloadBytes < mTotalSize || (mTotalSize == -1)){
 						if(mTotalSize > 0){
 							mProgressDialog.setProgress(mDownloadBytes * 100 / mTotalSize);
-							Log.d(TAG, "totalsize = "+mTotalSize/1024 + " downloadsize = "+mDownloadBytes/1024+" % = "+ mDownloadBytes * 100 / mTotalSize);
+							Log.d(TAG, "totalsize = "+mTotalSize + " downloadsize = "+mDownloadBytes+" % = "+ mDownloadBytes * 100 / mTotalSize);
 						}
 						mHandler.sendEmptyMessageDelayed(UPDATE_UI, 1000);
 					}
@@ -143,6 +149,7 @@ public class SystemUpdate extends PreferenceActivity implements OnPreferenceChan
 			mHandler.sendEmptyMessage(CHECK_MD5_FINISH);
 		}
 	}
+
 	private BroadcastReceiver receiver = new BroadcastReceiver() {   
 		@Override   
 		public void onReceive(Context context, Intent intent) {   
@@ -152,7 +159,6 @@ public class SystemUpdate extends PreferenceActivity implements OnPreferenceChan
 	};   
 
 	private  void startDownload(String url){
-
 		if(!mPrefs.contains(DL_ID)) {   
 			Uri resource = Uri.parse(url);   
 			DownloadManager.Request request = new DownloadManager.Request(resource);   
@@ -210,7 +216,7 @@ public class SystemUpdate extends PreferenceActivity implements OnPreferenceChan
 				}).show();
 				return false;
 			}
-
+			mUpdateFolder = new File(sdFile.getPath()+"/spupdate");
 		} else {
 			Log.d(TAG, "no sd card ...");
 			new AlertDialog.Builder(this).setMessage("please insert SD..")
@@ -238,7 +244,6 @@ public class SystemUpdate extends PreferenceActivity implements OnPreferenceChan
 		unregisterReceiver(receiver);
 	}  
 
-
 	@Override
 	protected void onDestroy() {
 		super.onDestroy();
@@ -252,25 +257,26 @@ public class SystemUpdate extends PreferenceActivity implements OnPreferenceChan
 	@Override
 	protected void onCreate(Bundle savedInstanceState) {
 		super.onCreate(savedInstanceState);
-		addPreferencesFromResource(R.xml.main);
+		addPreferencesFromResource(R.xml.system_update);
 		PreferenceScreen prefSet = getPreferenceScreen();
-		PreferenceCategory mUpdatesList = (PreferenceCategory) prefSet.findPreference(UPDATES_CATEGORY);
 
 		// Load the stored preference data
 		mPrefs = getSharedPreferences("SpUpdate", Context.MODE_MULTI_PROCESS);
-		mUpdateCheck = (ListPreference) findPreference(Constants.UPDATE_CHECK_PREF);
-		if (mUpdateCheck != null) {
-			int check = mPrefs.getInt(Constants.UPDATE_CHECK_PREF, Constants.UPDATE_FREQ_WEEKLY);
-			mUpdateCheck.setValue(String.valueOf(check));
-			mUpdateCheck.setSummary(mapCheckValue(check));
-			mUpdateCheck.setOnPreferenceChangeListener(this);
-		}
 
 		mSystemMod = SysUtils.getSystemProperty(Customization.BOARD);
-		mSystemRom = SysUtils.getSystemProperty(Customization.SYS_PROP_MOD_VERSION);
-
+		mSystemBuild = SysUtils.getSystemProperty(Customization.BUILD_DATE);
+		mSystemVersion = SysUtils.getSystemProperty(Customization.SYS_PROP_MOD_VERSION);
 
 		mDownloadManager = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
+
+		mLocalSystemInfo = findPreference(LOCAL_SYSTEM_INFO);
+		mLocalSystemInfo.setOnPreferenceClickListener( this);
+		mServerSystemInfo = findPreference(SERVER_SYSTEM_INFO);
+		mServerSystemInfo.setOnPreferenceClickListener(this);
+		mGengeralUpdate = findPreference(GENERAL_UPDATE);
+		mGengeralUpdate.setOnPreferenceClickListener(this);
+		mOnekeyUpdate = findPreference(ONE_KEY_UPDATE);
+		mOnekeyUpdate.setOnPreferenceClickListener(this);
 
 		final ActionBar bar = getActionBar();
 		bar.setDisplayHomeAsUpEnabled(true);
@@ -279,13 +285,14 @@ public class SystemUpdate extends PreferenceActivity implements OnPreferenceChan
 		checkNetworkInfo();
 
 		invalidateOptionsMenu();
-		updateLayout();
 
 		if(mPrefs.contains(DL_ID)){
 			mDownloadId = mPrefs.getLong(DL_ID, 0);
 			mDownloadManager.remove(mDownloadId);
 			mPrefs.edit().clear().commit();
 		}
+
+		checkForUpdates(DOWNLOAD_XML);
 	}
 
 	private void checkNetworkInfo(){
@@ -330,7 +337,11 @@ public class SystemUpdate extends PreferenceActivity implements OnPreferenceChan
 				Log.v(TAG, "STATUS_SUCCESSFUL"); 
 				mDownloadManager.remove(mPrefs.getLong(DL_ID, 0));   
 				mPrefs.edit().clear().commit(); 
-				checkForUpdates(DOWNLOAD_FINISH);
+				if(mWhichDownload == DOWNLOAD_XML){
+					mProgressDialog.dismiss();
+					startParseXML();
+				}else
+					checkForUpdates(DOWNLOAD_FINISH);
 				mDownloadId = 0;
 				mHandler.removeMessages(UPDATE_UI);
 				break;   
@@ -347,19 +358,6 @@ public class SystemUpdate extends PreferenceActivity implements OnPreferenceChan
 		c.close();
 	}
 
-	private String mapCheckValue(Integer value) {
-		Resources resources = getResources();
-		String[] checkNames = resources.getStringArray(R.array.update_check_entries);
-		String[] checkValues = resources.getStringArray(R.array.update_check_values);
-		for (int i = 0; i < checkValues.length; i++) {
-			if (Integer.decode(checkValues[i]).equals(value)) {
-				return checkNames[i];
-			}
-		}
-		return getString(R.string.unknown);
-	}
-
-
 	@Override
 	public boolean onCreateOptionsMenu(Menu menu) {
 		menu.add(0, MENU_REFRESH, 0, R.string.menu_refresh)
@@ -368,9 +366,6 @@ public class SystemUpdate extends PreferenceActivity implements OnPreferenceChan
 				| MenuItem.SHOW_AS_ACTION_WITH_TEXT);
 
 		menu.add(0, MENU_DELETE_ALL, 0, R.string.menu_delete_all)
-		.setShowAsActionFlags(MenuItem.SHOW_AS_ACTION_COLLAPSE_ACTION_VIEW);
-
-		menu.add(0, MENU_SYSTEM_INFO, 0, R.string.menu_system_info)
 		.setShowAsActionFlags(MenuItem.SHOW_AS_ACTION_COLLAPSE_ACTION_VIEW);
 
 		return true;
@@ -387,10 +382,6 @@ public class SystemUpdate extends PreferenceActivity implements OnPreferenceChan
 			confirmDeleteAll();
 			return true;
 
-		case MENU_SYSTEM_INFO:
-			showSysInfo();
-			return true;
-
 		case android.R.id.home:
 			SystemUpdate.this.onBackPressed();
 			return true;
@@ -404,9 +395,7 @@ public class SystemUpdate extends PreferenceActivity implements OnPreferenceChan
 		builder.setMessage(R.string.confirm_delete_all_dialog_message);
 		builder.setPositiveButton(R.string.dialog_yes, new DialogInterface.OnClickListener() {
 			public void onClick(DialogInterface dialog, int which) {
-				// We are OK to delete, trigger it
 				deleteOldUpdates();
-				updateLayout();
 			}
 		});
 		builder.setNegativeButton(R.string.dialog_no, null);
@@ -416,7 +405,6 @@ public class SystemUpdate extends PreferenceActivity implements OnPreferenceChan
 
 	private boolean deleteOldUpdates() {
 		boolean success;
-		//mUpdateFolder: Foldername with fullpath of SDCARD
 		if (mUpdateFolder.exists() && mUpdateFolder.isDirectory()) {
 			deleteDir(mUpdateFolder);
 			mUpdateFolder.mkdir();
@@ -442,75 +430,21 @@ public class SystemUpdate extends PreferenceActivity implements OnPreferenceChan
 				}
 			}
 		}
-		// The directory is now empty so delete it
 		return dir.delete();
-	}
-
-	private void showSysInfo() {
-		// Build the message
-		Date lastCheck = new Date(mPrefs.getLong(Constants.LAST_UPDATE_CHECK_PREF, 0));
-		String message = getString(R.string.sysinfo_device) + " " + mSystemMod + "\n\n"
-				+ getString(R.string.sysinfo_running)+ " "+ mSystemRom + "\n\n"
-				+ getString(R.string.sysinfo_last_check) + " " + lastCheck.toString();
-
-		AlertDialog.Builder builder = new AlertDialog.Builder(this);
-		builder.setTitle(R.string.menu_system_info);
-		builder.setMessage(message);
-		builder.setPositiveButton(R.string.dialog_ok, null);
-		AlertDialog dialog = builder.create();
-		dialog.show();
-		((TextView)dialog.findViewById(android.R.id.message)).setTextAppearance(this,
-				android.R.style.TextAppearance_DeviceDefault_Small);
 	}
 
 	public void checkForUpdates(int status) {
 		if(status == DOWNLOAD_XML){
-			mProgressDialog = new ProgressDialog(this);
-			mProgressDialog.setTitle(R.string.checking_for_updates);
-			mProgressDialog.setMessage(this.getResources().getString(R.string.checking_for_updates));
-			mProgressDialog.setIndeterminate(true);
-			mProgressDialog.setCancelable(true);
-			mProgressDialog.setCanceledOnTouchOutside(false);
-			mProgressDialog.setOnCancelListener(new OnCancelListener() {
-				public void onCancel(DialogInterface dialog) {
-				}
-			});
-			mProgressDialog.show();
+			String message = getResources().getString(R.string.checking_for_updates);
+			showProgressDialog(false, message,  message);
 			mHandler.sendEmptyMessage(DOWNLOAD_XML);
 		} else if (status == DOWNLOAD_ROM){
-			if(mProgressDialog != null){
-				mProgressDialog.dismiss();
-			}
-			mProgressDialog = new ProgressDialog(this);
-			mProgressDialog.setMessage("Downloading...");
-			mProgressDialog.setIndeterminate(false);
-			mProgressDialog.setCancelable(true);
-			mProgressDialog.setCanceledOnTouchOutside(false);
-			mProgressDialog.setProgressStyle(ProgressDialog.STYLE_HORIZONTAL);
-			mProgressDialog.setMax(100);
-			mProgressDialog.setProgress(0);
-			mProgressDialog.setOnCancelListener(new OnCancelListener() {
-				public void onCancel(DialogInterface dialog) {
-					new AlertDialog.Builder(SystemUpdate.this).setMessage("Cancel download")
-					.setPositiveButton(android.R.string.ok, new DialogInterface.OnClickListener() {
-		
-						@Override
-						public void onClick(DialogInterface dialog, int which) {
-							SystemUpdate.this.finish();
-						}
-					}).setNegativeButton(android.R.string.cancel, new DialogInterface.OnClickListener() {
-		
-						@Override
-						public void onClick(DialogInterface dialog, int which) {
-							mHandler.removeMessages(UPDATE_UI);
-							checkForUpdates(DOWNLOAD_ROM);
-						}
-					}).show();
-				}
-			});
-			mProgressDialog.show();
 			mHandler.sendEmptyMessage(DOWNLOAD_ROM);
-			mHandler.sendEmptyMessage(UPDATE_UI);
+//			if(!mOnekey){
+				showProgressDialog(true, "Downloading...", null);
+				mHandler.sendEmptyMessageDelayed(UPDATE_UI,400);
+//			}
+			
 		} else if (status == DOWNLOAD_FAILED){
 			if(mProgressDialog != null){
 				mProgressDialog.dismiss();
@@ -526,34 +460,46 @@ public class SystemUpdate extends PreferenceActivity implements OnPreferenceChan
 			}).show();
 		} else if (status == DOWNLOAD_FINISH){
 			if(mWhichDownload == DOWNLOAD_XML){
-				startParseXML();
-				Log.d(TAG, "found : currentSYstemid = "+mSystemRom+"Downloaded Rom build id = "+mRom.getBuildTime()+"\n");
-				if(mProgressDialog != null){
-					mProgressDialog.dismiss();
-				}
+				Log.d(TAG, "found : currentSYstemid = "+mSystemBuild+"Downloaded Rom build id = "+mRom.getBuildTime()+"\n");
 				if(mRom != null){
 					String message = "Device: "+mRom.getDevice() + "\n" + "Version: " + mRom.getVersion()+"\n"
-							+"BuildDate: "+ mRom.getBuildTime()+" \n"
-							+"MD5: "+ mRom.getMD5();
-
-					AlertDialog.Builder builder = new AlertDialog.Builder(this);
-					builder.setTitle("Found System Update");
-					builder.setMessage(message);
-					builder.setPositiveButton("Download Now", new DialogInterface.OnClickListener() {
-
-						@Override
-						public void onClick(DialogInterface dialog, int which) {
+							+"BuildDate: "+ mRom.getBuildTime();
+					if(true || mSystemBuild.compareTo(mRom.getBuildTime()) < 0){
+						if(mOnekey){
 							checkForUpdates(DOWNLOAD_ROM);
+							mProgressDialog.setMessage("Update...");
+							return;
 						}
-					});
-					AlertDialog dialog = builder.create();
-					dialog.show();
-					((TextView)dialog.findViewById(android.R.id.message)).setTextAppearance(this,
-							android.R.style.TextAppearance_DeviceDefault_Small);
+						AlertDialog.Builder builder = new AlertDialog.Builder(this);
+						builder.setTitle("Found System Update");
+						builder.setMessage(message);
+						builder.setPositiveButton("Download Now", new DialogInterface.OnClickListener() {
+
+							@Override
+							public void onClick(DialogInterface dialog, int which) {
+								checkForUpdates(DOWNLOAD_ROM);
+							}
+						});
+						AlertDialog dialog = builder.create();
+						dialog.show();
+						((TextView)dialog.findViewById(android.R.id.message)).setTextAppearance(this,
+								android.R.style.TextAppearance_DeviceDefault_Small);
+					} else {
+						new AlertDialog.Builder(this).setMessage("No Found System Update..")
+						.setPositiveButton(android.R.string.ok, new DialogInterface.OnClickListener() {
+
+							@Override
+							public void onClick(DialogInterface dialog, int which) {
+							}
+						}).show();
+					}
 				}
-			}
-			else if(mWhichDownload == DOWNLOAD_ROM){
+			} else if (mWhichDownload == DOWNLOAD_ROM){
+				Log.d(TAG, " download rom from server  has finished...");
 				if (!mIsCheckMd5){
+					if(mOnekey){
+						mProgressDialog.setMessage("Verify...");
+					}
 					new checkThread().start();
 					return;
 				}
@@ -573,10 +519,16 @@ public class SystemUpdate extends PreferenceActivity implements OnPreferenceChan
 
 						@Override
 						public void onClick(DialogInterface dialog, int which) {
-							SystemUpdate.this.finish();
+							deleteOldUpdates();
 						}
 					}).show();
 				}else {
+					if(mOnekey){
+						mProgressDialog.setMessage("reboot and Update");
+						Log.d(TAG, "reboot 。。。。");
+						SystemUpdate.this.finish();
+						return;
+					}
 					if(mProgressDialog != null){
 						mProgressDialog.dismiss();
 					}
@@ -612,42 +564,94 @@ public class SystemUpdate extends PreferenceActivity implements OnPreferenceChan
 		}
 	}
 
-	public void updateLayout() {
+	private void showDailog(String title, String message, final boolean btn){
+		AlertDialog.Builder builder = new AlertDialog.Builder(this);
+		builder.setTitle(title);
+		builder.setMessage(message);
+		builder.setPositiveButton(btn? "Download Now" : getString(android.R.string.ok), new DialogInterface.OnClickListener() {
 
-		// Read existing Updates
-		List<String> existingFilenames = null;
-		mUpdateFolder = new File(Environment.getExternalStorageDirectory() + "/spupdate");
-		FilenameFilter f = new UpdateFilter(".zip");
-		File[] files = mUpdateFolder.listFiles(f);
-
-		// If Folder Exists and Updates are present(with md5files)
-		if (mUpdateFolder.exists() && mUpdateFolder.isDirectory() && files != null && files.length > 0) {
-			//To show only the Filename. Otherwise the whole Path with /sdcard/cm-updates will be shown
-			existingFilenames = new ArrayList<String>();
-			for (File file : files) {
-				if (file.isFile()) {
-					existingFilenames.add(file.getName());
+			@Override
+			public void onClick(DialogInterface dialog, int which) {
+				if(btn){
+					checkForUpdates(DOWNLOAD_ROM);
 				}
 			}
-			//For sorting the Filenames, have to find a way to do natural sorting
-			existingFilenames = Collections.synchronizedList(existingFilenames);
-			Collections.sort(existingFilenames, Collections.reverseOrder());
+		});
+		AlertDialog dialog = builder.create();
+		dialog.show();
+		((TextView)dialog.findViewById(android.R.id.message)).setTextAppearance(this,
+				android.R.style.TextAppearance_DeviceDefault_Small);
+	}
+
+	private void showProgressDialog(boolean showdown, String message, String title){
+		if(mProgressDialog != null){
+			mProgressDialog.dismiss();
 		}
-		files = null;
+		mProgressDialog = new ProgressDialog(this);
+		if(message != null)
+			mProgressDialog.setMessage(message);
+		if(title != null)
+			mProgressDialog.setTitle(title);
+		mProgressDialog.setCancelable(true);
+		mProgressDialog.setCanceledOnTouchOutside(false);
+		if(showdown){
+			mProgressDialog.setIndeterminate(false);
+			mProgressDialog.setProgressStyle(ProgressDialog.STYLE_HORIZONTAL);
+			mProgressDialog.setMax(100);
+			mProgressDialog.setProgress(0);
+			mProgressDialog.setOnCancelListener(new OnCancelListener() {
+				public void onCancel(DialogInterface dialog) {
+					new AlertDialog.Builder(SystemUpdate.this).setMessage("Cancel download")
+					.setPositiveButton(android.R.string.ok, new DialogInterface.OnClickListener() {
 
-		// Clear the notification if one exists
+						@Override
+						public void onClick(DialogInterface dialog, int which) {
+							mHandler.removeMessages(UPDATE_UI);
+							SystemUpdate.this.finish();
+						}
+					}).setNegativeButton(android.R.string.cancel, new DialogInterface.OnClickListener() {
 
+						@Override
+						public void onClick(DialogInterface dialog, int which) {
+							mHandler.removeMessages(UPDATE_UI);
+							checkForUpdates(DOWNLOAD_ROM);
+						}
+					}).show();
+				}
+			});
+		}else{
+			mProgressDialog.setIndeterminate(true);
+			mProgressDialog.setOnCancelListener(new OnCancelListener() {
+				public void onCancel(DialogInterface dialog) {
+					SystemUpdate.this.finish();
+				}
+			});
+		}
+		mProgressDialog.show();
 	}
 
 	@Override
-	public boolean onPreferenceChange(Preference preference, Object newValue) {
-		if (preference == mUpdateCheck) {
-			int value = Integer.valueOf((String) newValue);
-			mPrefs.edit().putInt(Constants.UPDATE_CHECK_PREF, value).apply();
-			mUpdateCheck.setSummary(mapCheckValue(value));
-			//            scheduleUpdateService(value * 1000);
-			return true;
-		}
+	public boolean onPreferenceClick(Preference preference) {
+		if(preference == mLocalSystemInfo){
+			String message = "Device: "+mSystemMod + "\n" + "Version: " + mSystemVersion+"\n"
+					+"BuildDate: "+ mSystemBuild;
+			String title = getString(R.string.current_system_info);
+			showDailog(title, message, false);
+		} else if (preference == mServerSystemInfo){
+			if(mRom != null){
+				String message = "Device: "+mRom.getDevice() + "\n" + "Version: " + mRom.getVersion()+"\n"
+						+"BuildDate: "+ mRom.getBuildTime();
+				String title = getString(R.string.server_system_info);
+				showDailog(title, message, false);
+			}
+		} else if (preference == mGengeralUpdate){
+			mOnekey = false;
+			checkForUpdates(DOWNLOAD_FINISH);
+		} else if (preference == mOnekeyUpdate){
+			mOnekey = true;
+			showProgressDialog(false, getResources().getString(R.string.checking_for_updates), null);
+			checkForUpdates(DOWNLOAD_FINISH);
+		}		
 		return false;
 	}
 

@@ -3,17 +3,8 @@
 
     <string name="app_name">SystemUpdate</string>
     <string name="action_settings">Settings</string>
-    <string name="hello_world">Hello world!</string>
     <string name="update_check_title">Check for updates</string>
-    <string name="check_manual">Manual</string>
-    <string name="check_on_boot">On every boot</string>
-    <string name="check_twice_daily">Twice daily</string>
-    <string name="check_daily">Daily</string>
-    <string name="check_weekly">Weekly</string>
-    <string name="check_bi_weekly">Bi-weekly</string>
-    <string name="check_monthly">Monthly</string>
     <string name="available_updates_title">Available updates</string>
-    <string name="unknown">Unknown</string>
     <string name="menu_refresh">Refresh</string>
     <string name="menu_delete">Delete</string>
     <string name="menu_delete_all">Delete downloads</string>
@@ -40,5 +31,13 @@
     <string name="dialog_update">Update</string>
     <string name="dialog_close">Close</string>
     <string name="checking_for_updates">Checking for updates</string>
-
+    
+    <string name="current_system_info">Local System Info</string>
+    <string name="check_current_system_info">check running system</string>
+    <string name="server_system_info">Server System Info</string>
+    <string name="check_server_system_info">check server system</string>
+    <string name="general_update">General Upgrade</string>
+    <string name="user_general_update">need your choice</string>
+    <string name="one_key_update">OneKey Upgrade</string>
+    <string name="user_one_key_update">one key done</string>
 </resources>
