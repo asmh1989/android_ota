@@ -9,7 +9,6 @@ import android.app.ActionBar;
 import android.app.AlertDialog;
 import android.app.DownloadManager;
 import android.app.DownloadManager.Request;
-import android.app.NotificationManager;
 import android.app.ProgressDialog;
 import android.content.BroadcastReceiver;
 import android.content.Context;
@@ -18,39 +17,30 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.DialogInterface.OnCancelListener;
-import android.content.res.Resources;
 import android.database.Cursor;
-import android.inputmethodservice.Keyboard.Key;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo.State;
 import android.net.Uri;
-import android.os.Binder;
 import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
 import android.os.Message;
 import android.os.StatFs;
-import android.preference.ListPreference;
 import android.preference.Preference;
-import android.preference.Preference.OnPreferenceChangeListener;
 import android.preference.Preference.OnPreferenceClickListener;
 import android.preference.PreferenceActivity;
-import android.preference.PreferenceCategory;
 import android.preference.PreferenceScreen;
+import android.text.format.DateFormat;
 import android.util.Log;
-import android.view.KeyEvent;
-import android.view.LayoutInflater;
 import android.view.Menu;
 import android.view.MenuItem;
-import android.view.View;
 import android.webkit.MimeTypeMap;
-import android.webkit.WebHistoryItem;
-import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
 public class SystemUpdate extends PreferenceActivity implements OnPreferenceClickListener {
 	private static final String TAG="SUNUPDATE";
+	private static final boolean TEST = true;
 	private SharedPreferences mPrefs;
 
 	private static final String DL_ID = "downloadId";
@@ -172,7 +162,7 @@ public class SystemUpdate extends PreferenceActivity implements OnPreferenceClic
 			mDownloadPath  = file.getPath();
 			Log.d(TAG, "download path = "+mDownloadPath);
 			request.setShowRunningNotification(false);  
-			request.setVisibleInDownloadsUi(true);
+			request.setVisibleInDownloadsUi(TEST);
 			if(filename.contains(".xml")){
 				if(file.exists()){
 					Log.d(TAG, "delete "+mDownloadPath);
@@ -464,7 +454,7 @@ public class SystemUpdate extends PreferenceActivity implements OnPreferenceClic
 				if(mRom != null){
 					String message = "Device: "+mRom.getDevice() + "\n" + "Version: " + mRom.getVersion()+"\n"
 							+"BuildDate: "+ mRom.getBuildTime();
-					if(true || mSystemBuild.compareTo(mRom.getBuildTime()) < 0){
+					if(TEST || mSystemBuild.compareTo(mRom.getBuildTime()) < 0){
 						if(mOnekey){
 							checkForUpdates(DOWNLOAD_ROM);
 							mProgressDialog.setMessage("Update...");
@@ -653,6 +643,10 @@ public class SystemUpdate extends PreferenceActivity implements OnPreferenceClic
 			checkForUpdates(DOWNLOAD_FINISH);
 		}		
 		return false;
+	}
+	
+	private String formatTime(String t){
+		return DateFormat.format("yyyy:MM:dd kk:mm:ss", Long.parseLong(t)).toString();
 	}
 
 }

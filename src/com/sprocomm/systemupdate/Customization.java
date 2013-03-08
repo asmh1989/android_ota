@@ -13,7 +13,7 @@ public class Customization {
     // Android Board type
     public static final String BOARD = "ro.product.model";
     // Current ROM build date
-    public static final String BUILD_DATE = "ro.build.date.utc";
+    public static final String BUILD_DATE = "ro.build.date";
     // Name of the current ROM
     public static final String SYS_PROP_MOD_VERSION = "ro.build.display.id";
     
