@@ -3,7 +3,9 @@ package com.sprocomm.systemupdate;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
+import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 
 import android.app.ActionBar;
 import android.app.AlertDialog;
@@ -25,7 +27,9 @@ import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
 import android.os.Message;
+import android.os.PowerManager;
 import android.os.StatFs;
+import android.os.storage.StorageManager;
 import android.preference.Preference;
 import android.preference.Preference.OnPreferenceClickListener;
 import android.preference.PreferenceActivity;
@@ -40,14 +44,19 @@ import android.widget.Toast;
 
 public class SystemUpdate extends PreferenceActivity implements OnPreferenceClickListener {
 	private static final String TAG="SUNUPDATE";
-	private static final boolean TEST = true;
+	private static final boolean TEST = false;
 	private SharedPreferences mPrefs;
 
 	private static final String DL_ID = "downloadId";
+	private static final String DEFAULT_INTERNAL_SDCARD = "/data/default_internal_sdcard";
+	private static final String INTERNAL_PATH = "/sdcard2";           // if mount on recovery , it should be /emmc , but...
+	private static final String EXTERNAL_PATH = "/sdcard";
+	private static final String UPDATES_FOLDER = "/spupdater"; 
 	private static long mDownloadId;
 
 	private static final int MENU_REFRESH = 0;
 	private static final int MENU_DELETE_ALL = 1;
+	private static final int MENU_UPDATER_FROM_FILE=2;
 	private static final long NEED_MIN_SIZE = 300; //300M
 
 	private static final int DOWNLOAD_XML=1;
@@ -56,6 +65,8 @@ public class SystemUpdate extends PreferenceActivity implements OnPreferenceClic
 	private static final int UPDATE_UI=11;
 	private static final int DOWNLOAD_FINISH=100;
 	private static final int DOWNLOAD_FAILED=101;
+	private static final int ACTIVITY_REQUEST_PICK_ROM = 1;
+
 	private static String mDownloadPath;
 	private static int mWhichDownload;
 
@@ -65,6 +76,7 @@ public class SystemUpdate extends PreferenceActivity implements OnPreferenceClic
 	private String mSystemBuild;
 	private String mSystemVersion;
 
+
 	private File mUpdateFolder;
 	private ProgressDialog mProgressDialog;
 
@@ -73,6 +85,7 @@ public class SystemUpdate extends PreferenceActivity implements OnPreferenceClic
 	private boolean mCheckFile = false;
 	private boolean mExistRom = false;
 	private boolean mOnekey = false;
+	private boolean mHasTwoStorage = false;
 	private int mDownloadBytes;
 	private int mTotalSize = -1;
 
@@ -158,7 +171,10 @@ public class SystemUpdate extends PreferenceActivity implements OnPreferenceClic
 			String mimeString = mimeTypeMap.getMimeTypeFromExtension(MimeTypeMap.getFileExtensionFromUrl(url));  
 			request.setMimeType(mimeString);  
 			String filename = url.substring(url.lastIndexOf("/"));
-			File file = new File("/sdcard/spupdate"+filename);
+			if(mUpdateFolder == null){
+				checkSDStatus();
+			}
+			File file = new File(mUpdateFolder.getAbsolutePath()+filename);
 			mDownloadPath  = file.getPath();
 			Log.d(TAG, "download path = "+mDownloadPath);
 			request.setShowRunningNotification(false);  
@@ -179,7 +195,7 @@ public class SystemUpdate extends PreferenceActivity implements OnPreferenceClic
 				}
 			}
 
-			request.setDestinationInExternalPublicDir("/spupdate", filename);
+			request.setDestinationInExternalPublicDir(mHasTwoStorage ? UPDATES_FOLDER : "/spupdater", filename);
 			mDownloadId = mDownloadManager.enqueue(request);   
 			mPrefs.edit().putLong(DL_ID, mDownloadId).commit();  
 		} else {   
@@ -206,7 +222,13 @@ public class SystemUpdate extends PreferenceActivity implements OnPreferenceClic
 				}).show();
 				return false;
 			}
-			mUpdateFolder = new File(sdFile.getPath()+"/spupdate");
+			if (new File(sdFile.getParent()+"/ext_sdcard").exists()){
+				mHasTwoStorage = true;
+				mUpdateFolder = new File(sdFile.getPath()+UPDATES_FOLDER);
+			} else {
+				mHasTwoStorage = false;
+				mUpdateFolder = new File(sdFile.getPath()+"/spupdater");
+			}
 		} else {
 			Log.d(TAG, "no sd card ...");
 			new AlertDialog.Builder(this).setMessage("please insert SD..")
@@ -255,6 +277,8 @@ public class SystemUpdate extends PreferenceActivity implements OnPreferenceClic
 
 		mSystemMod = SysUtils.getSystemProperty(Customization.BOARD);
 		mSystemBuild = SysUtils.getSystemProperty(Customization.BUILD_DATE);
+		mSystemBuild = mSystemBuild.split("\\.").length > 2 ? mSystemBuild.split("\\.")[2] : mSystemBuild.split("\\.")[0];
+		Log.d(TAG, "mSystemBuild = "+mSystemBuild);
 		mSystemVersion = SysUtils.getSystemProperty(Customization.SYS_PROP_MOD_VERSION);
 
 		mDownloadManager = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
@@ -267,12 +291,11 @@ public class SystemUpdate extends PreferenceActivity implements OnPreferenceClic
 		mGengeralUpdate.setOnPreferenceClickListener(this);
 		mOnekeyUpdate = findPreference(ONE_KEY_UPDATE);
 		mOnekeyUpdate.setOnPreferenceClickListener(this);
+		
+		prefSet.removePreference(mOnekeyUpdate);
 
 		final ActionBar bar = getActionBar();
 		bar.setDisplayHomeAsUpEnabled(true);
-
-		checkSDStatus();
-		checkNetworkInfo();
 
 		invalidateOptionsMenu();
 
@@ -281,8 +304,11 @@ public class SystemUpdate extends PreferenceActivity implements OnPreferenceClic
 			mDownloadManager.remove(mDownloadId);
 			mPrefs.edit().clear().commit();
 		}
-
-		checkForUpdates(DOWNLOAD_XML);
+		if(!TEST){
+			checkSDStatus();
+			checkNetworkInfo();
+			checkForUpdates(DOWNLOAD_XML);
+		}
 	}
 
 	private void checkNetworkInfo(){
@@ -357,6 +383,9 @@ public class SystemUpdate extends PreferenceActivity implements OnPreferenceClic
 
 		menu.add(0, MENU_DELETE_ALL, 0, R.string.menu_delete_all)
 		.setShowAsActionFlags(MenuItem.SHOW_AS_ACTION_COLLAPSE_ACTION_VIEW);
+		
+		menu.add(0, MENU_UPDATER_FROM_FILE, 0, "Select from filemanager")
+		.setShowAsActionFlags(MenuItem.SHOW_AS_ACTION_COLLAPSE_ACTION_VIEW);
 
 		return true;
 	}
@@ -375,9 +404,43 @@ public class SystemUpdate extends PreferenceActivity implements OnPreferenceClic
 		case android.R.id.home:
 			SystemUpdate.this.onBackPressed();
 			return true;
+		case MENU_UPDATER_FROM_FILE:
+	        Intent i = new Intent(Intent.ACTION_GET_CONTENT);
+	        i.addCategory(Intent.CATEGORY_OPENABLE);
+	        i.setType("*/*");
+	        startActivityForResult(
+	                Intent.createChooser(i, "Choose Rom"),
+	                ACTIVITY_REQUEST_PICK_ROM);
 		}
 		return false;
 	}
+	
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+    	if(requestCode ==  ACTIVITY_REQUEST_PICK_ROM){
+    		if(data == null){
+    			return;
+    		}
+    		String path = data.getDataString();
+    		final String name = path.substring(path.lastIndexOf("/")+1);
+    		Log.d(TAG, "select rom = "+ data.getData()+"\t name = "+ name);
+    		
+    		if(path.substring(path.lastIndexOf(".")).contains("zip")){
+    			new AlertDialog.Builder(this).setMessage("Reboot phone to update..")
+    				.setPositiveButton(android.R.string.ok, new DialogInterface.OnClickListener() {
+						
+						@Override
+						public void onClick(DialogInterface dialog, int which) {
+							updateSysytem(name, true);
+						}
+					})
+					.setNegativeButton(android.R.string.cancel, null).show();
+    		} else {
+    			Toast.makeText(this, "you need choose file with .zip", Toast.LENGTH_LONG);
+    		}
+    		
+    	}
+    }
 
 	private void confirmDeleteAll() {
 		AlertDialog.Builder builder = new AlertDialog.Builder(this);
@@ -430,11 +493,11 @@ public class SystemUpdate extends PreferenceActivity implements OnPreferenceClic
 			mHandler.sendEmptyMessage(DOWNLOAD_XML);
 		} else if (status == DOWNLOAD_ROM){
 			mHandler.sendEmptyMessage(DOWNLOAD_ROM);
-//			if(!mOnekey){
-				showProgressDialog(true, "Downloading...", null);
-				mHandler.sendEmptyMessageDelayed(UPDATE_UI,400);
-//			}
-			
+			//			if(!mOnekey){
+			showProgressDialog(true, "Downloading...", null);
+			mHandler.sendEmptyMessageDelayed(UPDATE_UI,400);
+			//			}
+
 		} else if (status == DOWNLOAD_FAILED){
 			if(mProgressDialog != null){
 				mProgressDialog.dismiss();
@@ -529,11 +592,66 @@ public class SystemUpdate extends PreferenceActivity implements OnPreferenceClic
 
 						@Override
 						public void onClick(DialogInterface dialog, int which) {
-							SystemUpdate.this.finish();
+							//							SystemUpdate.this.finish();
+							updateSysytem(mRom.getFileName(), false);
 						}
 					}).show();
 				}
 			}
+		}
+	}
+
+	protected void updateSysytem(String name, boolean fromfile) {
+		/*
+		 * Should perform the following steps.
+		 * 0.- Ask the user for a confirmation (already done when we reach here)
+		 * 1.- mkdir -p /cache/recovery
+		 * 2.- echo 'boot-recovery' > /cache/recovery/command
+		 * 3.- if(mBackup) echo '--nandroid'  >> /cache/recovery/command
+		 * 4.- echo '--update_package=SDCARD:update.zip' >> /cache/recovery/command
+		 * 5.- reboot recovery
+		 */
+		try {
+			// Set the 'boot recovery' command
+			Process p = Runtime.getRuntime().exec("sh");
+			OutputStream os = p.getOutputStream();
+			os.write("mkdir -p /cache/recovery/\n".getBytes());
+			os.write("echo 'boot-recovery' >/cache/recovery/command\n".getBytes());
+
+			// See if backups are enabled and add the nandroid flag
+			/* TODO: add this back once we have a way of doing backups that is not recovery specific
+            SharedPreferences prefs = getSharedPreferences("CMUpdate", Context.MODE_MULTI_PROCESS);
+            if (prefs.getBoolean(Constants.BACKUP_PREF, true)) {
+                os.write("echo '--nandroid'  >> /cache/recovery/command\n".getBytes());
+            }
+			 */
+
+			// Add the update folder/file name
+			String cmd = "echo '--update_package="+getStorageMountpoint()
+					+ (fromfile ? "/":(UPDATES_FOLDER + "/")) + name
+					+ "' > /cache/recovery/command\n";
+			Log.d(TAG, "cmd = "+cmd);
+			os.write(cmd.getBytes());
+			os.flush();
+
+			// Trigger the reboot
+			PowerManager powerManager = (PowerManager) getSystemService(Context.POWER_SERVICE);
+			powerManager.reboot("recovery");
+
+		} catch (IOException e) {
+			Log.e(TAG, "Unable to reboot into recovery mode:", e);
+			Toast.makeText(SystemUpdate.this, "Unable to reboot into recovery mode", Toast.LENGTH_SHORT).show();
+		}
+	}
+
+	protected String getStorageMountpoint() {
+		File file = new File(DEFAULT_INTERNAL_SDCARD);
+		if(file.exists()){
+			Log.d(TAG, "defalt storage is internal_sdcard");
+			return INTERNAL_PATH;
+		} else {
+			Log.d(TAG, "defalt storage is external_sdcard");
+			return EXTERNAL_PATH;
 		}
 	}
 
@@ -644,7 +762,7 @@ public class SystemUpdate extends PreferenceActivity implements OnPreferenceClic
 		}		
 		return false;
 	}
-	
+
 	private String formatTime(String t){
 		return DateFormat.format("yyyy:MM:dd kk:mm:ss", Long.parseLong(t)).toString();
 	}

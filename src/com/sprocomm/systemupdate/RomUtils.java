@@ -6,6 +6,7 @@ public class RomUtils {
     private String mBuildTime;
     private String mMD5;
     private String mDownloadUrl;
+    private String mFileName;
       
     public String getDevice() {  
         return mDevice;  
@@ -45,6 +46,14 @@ public class RomUtils {
     
     public void setDownLoadUrl(String url){
     	mDownloadUrl = url;
+    }
+    
+    public String getFileName(){
+    	return mFileName;
+    }
+    
+    public void setFileName(String name){
+    	mFileName = name;
     }
  
 }

@@ -42,6 +42,9 @@ public class PullRomParser {
 				}  else if (parser.getName().equals("downloadurl")){
 					eventType = parser.next();  
 					rom.setDownLoadUrl(parser.getText());  
+				} else if (parser.getName().equals("filename")){
+					eventType = parser.next();  
+					rom.setFileName(parser.getText());
 				}
 				break;  
 			case XmlPullParser.END_TAG:  
